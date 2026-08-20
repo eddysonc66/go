@@ -39,13 +39,13 @@
     // Guardar nuevo usuario (CREATE)
     document.getElementById('userForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      const nombre = document.getElementById('nombre').value;
+      const name = document.getElementById('nombre').value;
       const email = document.getElementById('email').value;
 
       await fetch(API_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nombre, email })
+        body: JSON.stringify({ name, email })
       });
 
       document.getElementById('userForm').reset();
@@ -63,7 +63,7 @@
         tbody.innerHTML += `
           <tr>
             <td>${u.id}</td>
-            <td>${u.nombre}</td>
+            <td>${u.name}</td>
             <td>${u.email}</td>
             <td>
               <button class="btn-delete" onclick="eliminarUsuario(${u.id})">Eliminar</button>

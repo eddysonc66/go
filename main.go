@@ -39,18 +39,18 @@ type DB struct {
 func main() {
 	// Reemplaza con tus credenciales reales
 	// Cadena de conexión: usuario:contraseña@tcp(127.0.0.1:3306)/nombre_bdd
-	dsn := "root:@tcp(127.0.0.1:3306)/empresa"
+	var dsn = "root:@tcp(127.0.0.1:3306)/empresa"
 
-	db, err := sql.Open("mysql", dsn)
+	var db, err = sql.Open("mysql", dsn)
 	if err != nil {
 		log.Fatalf("Error de configuración de BDD: %v", err)
 	}
 	defer db.Close()
 
-	app := &DB{db: db}
+	var app = &DB{db: db}
 
 	// Servir archivos estáticos (HTML y CSS) desde la carpeta "public"
-	fs := http.FileServer(http.Dir("./public"))
+	var fs = http.FileServer(http.Dir("./public"))
 	http.Handle("/", fs)
 
 	// Rutas de la API REST
@@ -67,7 +67,7 @@ func (app *DB) handleUsuarios(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case "GET":
-		rows, err := app.db.Query("SELECT id, name, email FROM usuarios")
+		var rows, err = app.db.Query("SELECT id, name, email FROM usuarios")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -84,16 +84,17 @@ func (app *DB) handleUsuarios(w http.ResponseWriter, r *http.Request) {
 
 	case "POST":
 		var u Usuario
-		if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		var errD = json.NewDecoder(r.Body).Decode(&u)
+		if errD != nil {
+			http.Error(w, errD.Error(), http.StatusBadRequest)
 			return
 		}
-		res, err := app.db.Exec("INSERT INTO usuarios (nombre, email) VALUES (?, ?)", u.Name, u.Email)
+		var res, err = app.db.Exec("INSERT INTO usuarios (name, email) VALUES (?, ?)", u.Name, u.Email)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		id, _ := res.LastInsertId()
+		var id, _ = res.LastInsertId()
 		u.Id = int(id)
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(u)
@@ -103,9 +104,9 @@ func (app *DB) handleUsuarios(w http.ResponseWriter, r *http.Request) {
 // Controlador para PUT (actualizar) y DELETE (eliminar)
 func (app *DB) handleUsuarioPorID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	idStr := r.URL.Path[len("/api/usuarios/"):]
-	id, err := strconv.Atoi(idStr)
-	if err != nil {
+	var idStr = r.URL.Path[len("/api/usuarios/"):]
+	var id, errA = strconv.Atoi(idStr)
+	if errA != nil {
 		http.Error(w, "ID inválido", http.StatusBadRequest)
 		return
 	}
@@ -113,11 +114,12 @@ func (app *DB) handleUsuarioPorID(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "PUT":
 		var u Usuario
-		if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+		var err = json.NewDecoder(r.Body).Decode(&u)
+		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		_, err := app.db.Exec("UPDATE usuarios SET nombre = ?, email = ? WHERE id = ?", u.Name, u.Email, id)
+		_, err = app.db.Exec("UPDATE usuarios SET name = ?, email = ? WHERE id = ?", u.Name, u.Email, id)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -126,7 +128,7 @@ func (app *DB) handleUsuarioPorID(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(u)
 
 	case "DELETE":
-		_, err := app.db.Exec("DELETE FROM usuarios WHERE id = ?", id)
+		var _, err = app.db.Exec("DELETE FROM usuarios WHERE id = ?", id)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
