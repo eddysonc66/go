@@ -1,85 +1,194 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <title>CRUD Usuarios - Go & MySQL</title>
-  <link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestión de Usuarios</title>
+    <!-- Estilos globales para el diseño del formulario -->
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* Estilos adicionales para complementar la edición dentro del diseño */
+        .btn-edit {
+            background-color: #ffc107;
+            color: #212529;
+            padding: 6px 12px;
+            margin-right: 5px;
+        }
+        .btn-edit:hover {
+            background-color: #e0a800;
+        }
+        .btn-cancel {
+            background-color: #6c757d;
+        }
+        .btn-cancel:hover {
+            background-color: #5a6268;
+        }
+        .actions-cell {
+            white-space: nowrap;
+            width: 150px;
+        }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h1>Gestión de Usuarios</h1>
 
-    <!-- Formulario para agregar usuario -->
-    <form id="userForm">
-      <input type="text" id="nombre" placeholder="Nombre" required>
-      <input type="email" id="email" placeholder="Correo electrónico" required>
-      <button type="submit">Guardar</button>
-    </form>
+    <div class="container">
+        <h1 id="form-title">Registrar Usuario</h1>
 
-    <!-- Tabla para listar usuarios -->
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Nombre</th>
-          <th>Email</th>
-          <th>Acciones</th>
-        </tr>
-      </thead>
-      <tbody id="userTable"></tbody>
-    </table>
-  </div>
+        <!-- FORMULARIO DE REGISTRO / EDICIÓN -->
+        <form id="user-form" onsubmit="manejadorFormulario(event)">
+            <input type="hidden" id="user-id">
+            <input type="text" id="user-name" placeholder="Nombre" required>
+            <input type="email" id="user-email" placeholder="Correo electrónico" required>
+            
+            <button type="submit" id="btn-submit">Guardar</button>
+            <button type="button" id="btn-cancel" class="btn-cancel" onclick="limpiarFormulario()" style="display: none;">Cancelar</button>
+        </form>
 
-  <script>
-    const API_URL = '/api/usuarios';
+        <!-- TABLA DE USUARIOS -->
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Nombre</th>
+                    <th>Email</th>
+                    <th>Acciones</th>
+                </tr>
+            </thead>
+            <tbody id="tabla-usuarios">
+                <!-- Filas cargadas dinámicamente con JS -->
+            </tbody>
+        </table>
+    </div>
 
-    // Cargar usuarios al iniciar
-    document.addEventListener('DOMContentLoaded', cargarUsuarios);
+    <script>
+        const API_URL = '/api/usuarios';
 
-    // Guardar nuevo usuario (CREATE)
-    document.getElementById('userForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const name = document.getElementById('nombre').value;
-      const email = document.getElementById('email').value;
+        // 1. OBTENER Y MOSTRAR TODOS LOS USUARIOS (GET)
+        async function cargarUsuarios() {
+            try {
+                const res = await fetch(API_URL);
+                const usuarios = await res.json();
+                
+                const tbody = document.getElementById('tabla-usuarios');
+                tbody.innerHTML = '';
 
-      await fetch(API_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, email })
-      });
+                usuarios.forEach(u => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${u.id}</td>
+                            <td>${u.name}</td>
+                            <td>${u.email}</td>
+                            <td class="actions-cell">
+                                <button class="btn-edit" onclick="prepararEdicion(${u.id}, '${u.name}', '${u.email}')">Editar</button>
+                                <button class="btn-delete" onclick="eliminarUsuario(${u.id})">Eliminar</button>
+                            </td>
+                        </tr>
+                    `;
+                });
+            } catch (err) {
+                console.error("Error al cargar usuarios:", err);
+            }
+        }
 
-      document.getElementById('userForm').reset();
-      cargarUsuarios();
-    });
+        // 2. MANEJADOR DEL FORMULARIO (DECIDE SI CREAR O ACTUALIZAR)
+        function manejadorFormulario(e) {
+            e.preventDefault(); // Evita que recargue la página
+            const id = document.getElementById('user-id').value;
 
-    // Obtener todos los usuarios (READ)
-    async function cargarUsuarios() {
-      const res = await fetch(API_URL);
-      const usuarios = await res.json() || [];
-      const tbody = document.getElementById('userTable');
-      tbody.innerHTML = '';
+            if (id) {
+                actualizarUsuario(id);
+            } else {
+                crearUsuario();
+            }
+        }
 
-      usuarios.forEach(u => {
-        tbody.innerHTML += `
-          <tr>
-            <td>${u.id}</td>
-            <td>${u.name}</td>
-            <td>${u.email}</td>
-            <td>
-              <button class="btn-delete" onclick="eliminarUsuario(${u.id})">Eliminar</button>
-            </td>
-          </tr>
-        `;
-      });
-    }
+        // 3. CREAR USUARIO (POST)
+        async function crearUsuario() {
+            const name = document.getElementById('user-name').value;
+            const email = document.getElementById('user-email').value;
 
-    // Eliminar usuario (DELETE)
-    async function eliminarUsuario(id) {
-      if (confirm('¿Seguro de eliminar este usuario?')) {
-        await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
+            try {
+                const res = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email })
+                });
+
+                if (res.ok) {
+                    limpiarFormulario();
+                    cargarUsuarios();
+                } else {
+                    const errText = await res.text();
+                    alert('Error al crear: ' + errText);
+                }
+            } catch (err) {
+                console.error("Error en POST:", err);
+            }
+        }
+
+        // 4. PASAR DATOS A MODO EDICIÓN
+        function prepararEdicion(id, name, email) {
+            document.getElementById('user-id').value = id;
+            document.getElementById('user-name').value = name;
+            document.getElementById('user-email').value = email;
+
+            // Cambiar textos y botones del formulario
+            document.getElementById('form-title').innerText = 'Editar Usuario #' + id;
+            document.getElementById('btn-submit').innerText = 'Actualizar';
+            document.getElementById('btn-cancel').style.display = 'inline-block';
+        }
+
+        // 5. ACTUALIZAR USUARIO (PUT)
+        async function actualizarUsuario(id) {
+            const name = document.getElementById('user-name').value;
+            const email = document.getElementById('user-email').value;
+
+            try {
+                const res = await fetch(`${API_URL}/${id}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email })
+                });
+
+                if (res.ok) {
+                    limpiarFormulario();
+                    cargarUsuarios();
+                } else {
+                    const errText = await res.text();
+                    alert('Error al actualizar: ' + errText);
+                }
+            } catch (err) {
+                console.error("Error en PUT:", err);
+            }
+        }
+
+        // 6. ELIMINAR USUARIO (DELETE)
+        async function eliminarUsuario(id) {
+            if (!confirm('¿Seguro que deseas eliminar este registro?')) return;
+
+            try {
+                const res = await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
+                if (res.ok) {
+                    cargarUsuarios();
+                }
+            } catch (err) {
+                console.error("Error en DELETE:", err);
+            }
+        }
+
+        // 7. RESTABLECER FORMULARIO A MODO CREAR
+        function limpiarFormulario() {
+            document.getElementById('user-id').value = '';
+            document.getElementById('user-name').value = '';
+            document.getElementById('user-email').value = '';
+
+            document.getElementById('form-title').innerText = 'Registrar Usuario';
+            document.getElementById('btn-submit').innerText = 'Guardar';
+            document.getElementById('btn-cancel').style.display = 'none';
+        }
+
+        // Inicializar la tabla al abrir
         cargarUsuarios();
-      }
-    }
-  </script>
+    </script>
 </body>
 </html>

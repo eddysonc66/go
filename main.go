@@ -28,8 +28,8 @@ type Usuario struct {
 // UsuarioRepository define el contrato (Polimorfismo / Abstracción)
 type UsuarioRepository interface {
 	ObtenerTodos() ([]Usuario, error)
-	Crear(u *Usuario) error
-	Actualizar(u *Usuario) error
+	Crear(u Usuario) (Usuario, error)
+	Actualizar(u Usuario) error
 	Eliminar(id int) error
 }
 
@@ -40,10 +40,10 @@ type mysqlUsuarioRepository struct {
 
 // Constructor del Repositorio
 func NewMySQLUsuarioRepository(db *sql.DB) UsuarioRepository {
-	return &mysqlUsuarioRepository{db: db}
+	return mysqlUsuarioRepository{db: db}
 }
 
-func (r *mysqlUsuarioRepository) ObtenerTodos() ([]Usuario, error) {
+func (r mysqlUsuarioRepository) ObtenerTodos() ([]Usuario, error) {
 	var rows, err = r.db.Query("SELECT id, name, email FROM usuarios")
 	if err != nil {
 		return nil, err
@@ -72,25 +72,25 @@ func (r *mysqlUsuarioRepository) ObtenerTodos() ([]Usuario, error) {
 	return usuarios, nil
 }
 
-func (r *mysqlUsuarioRepository) Crear(u *Usuario) error {
+func (r mysqlUsuarioRepository) Crear(u Usuario) (Usuario, error) {
 	var res, errE = r.db.Exec("INSERT INTO usuarios (name, email) VALUES (?, ?)", u.Name, u.Email)
 	if errE != nil {
-		return errE
+		return u, errE
 	}
 	var id, err = res.LastInsertId()
 	if err != nil {
-		return err
+		return u, err
 	}
 	u.ID = int(id)
-	return nil
+	return u, nil
 }
 
-func (r *mysqlUsuarioRepository) Actualizar(u *Usuario) error {
+func (r mysqlUsuarioRepository) Actualizar(u Usuario) error {
 	var _, err = r.db.Exec("UPDATE usuarios SET name = ?, email = ? WHERE id = ?", u.Name, u.Email, u.ID)
 	return err
 }
 
-func (r *mysqlUsuarioRepository) Eliminar(id int) error {
+func (r mysqlUsuarioRepository) Eliminar(id int) error {
 	var _, err = r.db.Exec("DELETE FROM usuarios WHERE id = ?", id)
 	return err
 }
@@ -105,11 +105,11 @@ type UsuarioHandler struct {
 }
 
 // Constructor del Handler
-func NewUsuarioHandler(repo UsuarioRepository) *UsuarioHandler {
-	return &UsuarioHandler{repo: repo}
+func NewUsuarioHandler(repo UsuarioRepository) UsuarioHandler {
+	return UsuarioHandler{repo: repo}
 }
 
-func (h *UsuarioHandler) HandleUsuarios(w http.ResponseWriter, r *http.Request) {
+func (h UsuarioHandler) HandleUsuarios(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	switch r.Method {
@@ -129,21 +129,21 @@ func (h *UsuarioHandler) HandleUsuarios(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 
-		var err2 = h.repo.Crear(&u)
+		var usuarioCreado, err2 = h.repo.Crear(u)
 		if err2 != nil {
 			http.Error(w, err2.Error(), http.StatusInternalServerError)
 			return
 		}
 
 		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(u)
+		json.NewEncoder(w).Encode(usuarioCreado)
 
 	default:
 		http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
 	}
 }
 
-func (h *UsuarioHandler) HandleUsuarioPorID(w http.ResponseWriter, r *http.Request) {
+func (h UsuarioHandler) HandleUsuarioPorID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	var idStr = r.URL.Path[len("/api/usuarios/"):]
@@ -162,7 +162,7 @@ func (h *UsuarioHandler) HandleUsuarioPorID(w http.ResponseWriter, r *http.Reque
 			return
 		}
 		u.ID = id
-		var err2 = h.repo.Actualizar(&u)
+		var err2 = h.repo.Actualizar(u)
 		if err2 != nil {
 			http.Error(w, err2.Error(), http.StatusInternalServerError)
 			return
