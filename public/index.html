@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>CRUD Usuarios - Go & MySQL</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Gestión de Usuarios</h1>
+
+    <!-- Formulario para agregar usuario -->
+    <form id="userForm">
+      <input type="text" id="nombre" placeholder="Nombre" required>
+      <input type="email" id="email" placeholder="Correo electrónico" required>
+      <button type="submit">Guardar</button>
+    </form>
+
+    <!-- Tabla para listar usuarios -->
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Nombre</th>
+          <th>Email</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="userTable"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const API_URL = '/api/usuarios';
+
+    // Cargar usuarios al iniciar
+    document.addEventListener('DOMContentLoaded', cargarUsuarios);
+
+    // Guardar nuevo usuario (CREATE)
+    document.getElementById('userForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const nombre = document.getElementById('nombre').value;
+      const email = document.getElementById('email').value;
+
+      await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nombre, email })
+      });
+
+      document.getElementById('userForm').reset();
+      cargarUsuarios();
+    });
+
+    // Obtener todos los usuarios (READ)
+    async function cargarUsuarios() {
+      const res = await fetch(API_URL);
+      const usuarios = await res.json() || [];
+      const tbody = document.getElementById('userTable');
+      tbody.innerHTML = '';
+
+      usuarios.forEach(u => {
+        tbody.innerHTML += `
+          <tr>
+            <td>${u.id}</td>
+            <td>${u.nombre}</td>
+            <td>${u.email}</td>
+            <td>
+              <button class="btn-delete" onclick="eliminarUsuario(${u.id})">Eliminar</button>
+            </td>
+          </tr>
+        `;
+      });
+    }
+
+    // Eliminar usuario (DELETE)
+    async function eliminarUsuario(id) {
+      if (confirm('¿Seguro de eliminar este usuario?')) {
+        await fetch(`${API_URL}/${id}`, { method: 'DELETE' });
+        cargarUsuarios();
+      }
+    }
+  </script>
+</body>
+</html>

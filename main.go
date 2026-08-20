@@ -2,8 +2,11 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
+	"strconv"
 
 	_ "github.com/go-sql-driver/mysql"
 )
@@ -13,108 +16,28 @@ import (
 // ==========================================
 
 // Usuario representa nuestra entidad en la BDD
+// Nota: Usuario: Define cómo se ve un usuario en memoria. Los fragmentos json:"id" se llaman Struct Tags y le dicen a Go qué nombre usar en las claves del objeto JSON que viajará al cliente web.
+// Nota 2: Los campos de una estructura solo son visibles para otros paquetes si su nombre empieza con letra MAYÚSCULA.
 type Usuario struct {
-	ID     int
-	Nombre string
-	Email  string
+	Id    int    `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
 }
 
 // ==========================================
-// 2. INTERFAZ (Contrato de comportamiento)
+// 2. IMPLEMENTACIÓN POO (Estructura con métodos)
 // ==========================================
 
-type UsuarioRepository interface {
-	Crear(u *Usuario) error
-	ObtenerPorID(id int) (*Usuario, error)
-	ObtenerTodos() ([]Usuario, error)
-	Actualizar(u *Usuario) error
-	Eliminar(id int) error
-}
-
-// ==========================================
-// 3. IMPLEMENTACIÓN POO (Estructura con métodos)
-// ==========================================
-
-type mysqlUsuarioRepository struct {
+// Nota: DB: Es una estructura contenedora que guarda el puntero a la conexión de la base de datos (*sql.DB). Esto nos permite adjuntarle métodos a la base de datos
+type DB struct {
 	db *sql.DB // Encapsulamos la conexión
 }
 
-// Constructor para instanciar el repositorio
-func NewUsuarioRepository(db *sql.DB) UsuarioRepository {
-	return &mysqlUsuarioRepository{db: db}
-}
-
-// CREATE
-func (r *mysqlUsuarioRepository) Crear(u *Usuario) error {
-	query := "INSERT INTO usuarios (nombre, email) VALUES (?, ?)"
-	result, err := r.db.Exec(query, u.Nombre, u.Email)
-	if err != nil {
-		return err
-	}
-
-	id, err := result.LastInsertId()
-	if err != nil {
-		return err
-	}
-	u.ID = int(id)
-	return nil
-}
-
-// READ (Uno)
-func (r *mysqlUsuarioRepository) ObtenerPorID(id int) (*Usuario, error) {
-	query := "SELECT id, nombre, email FROM usuarios WHERE id = ?"
-	row := r.db.QueryRow(query, id)
-
-	u := &Usuario{}
-	err := row.Scan(&u.ID, &u.Nombre, &u.Email)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("usuario no encontrado")
-		}
-		return nil, err
-	}
-	return u, nil
-}
-
-// READ (Todos)
-func (r *mysqlUsuarioRepository) ObtenerTodos() ([]Usuario, error) {
-	query := "SELECT id, nombre, email FROM usuarios"
-	rows, err := r.db.Query(query)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var usuarios []Usuario
-	for rows.Next() {
-		var u Usuario
-		if err := rows.Scan(&u.ID, &u.Nombre, &u.Email); err != nil {
-			return nil, err
-		}
-		usuarios = append(usuarios, u)
-	}
-	return usuarios, nil
-}
-
-// UPDATE
-func (r *mysqlUsuarioRepository) Actualizar(u *Usuario) error {
-	query := "UPDATE usuarios SET nombre = ?, email = ? WHERE id = ?"
-	_, err := r.db.Exec(query, u.Nombre, u.Email, u.ID)
-	return err
-}
-
-// DELETE
-func (r *mysqlUsuarioRepository) Eliminar(id int) error {
-	query := "DELETE FROM usuarios WHERE id = ?"
-	_, err := r.db.Exec(query, id)
-	return err
-}
-
 // ==========================================
-// 4. EJECUCIÓN DEL PROGRAMA (Main)
+// 3. EJECUCIÓN DEL PROGRAMA (Main)
 // ==========================================
-
 func main() {
+	// Reemplaza con tus credenciales reales
 	// Cadena de conexión: usuario:contraseña@tcp(127.0.0.1:3306)/nombre_bdd
 	dsn := "root:@tcp(127.0.0.1:3306)/empresa"
 
@@ -124,55 +47,90 @@ func main() {
 	}
 	defer db.Close()
 
-	// Probar conexión
-	if err := db.Ping(); err != nil {
-		log.Fatalf("No se pudo conectar a la BDD: %v", err)
-	}
-	fmt.Println("¡Conexión exitosa a MySQL!")
+	app := &DB{db: db}
 
-	// Instanciamos el repositorio (Inyección de dependencias)
-	repo := NewUsuarioRepository(db)
+	// Servir archivos estáticos (HTML y CSS) desde la carpeta "public"
+	fs := http.FileServer(http.Dir("./public"))
+	http.Handle("/", fs)
 
-	// --- 1. CREATE ---
-	nuevoUsuario := &Usuario{Nombre: "Carlos Pérez", Email: "carlos@example.com"}
-	err = repo.Crear(nuevoUsuario)
-	if err != nil {
-		log.Printf("Error al crear: %v", err)
-	} else {
-		fmt.Printf("Usuario creado con ID: %d\n", nuevoUsuario.ID)
-	}
+	// Rutas de la API REST
+	http.HandleFunc("/api/usuarios", app.handleUsuarios)
+	http.HandleFunc("/api/usuarios/", app.handleUsuarioPorID)
 
-	// --- 2. READ (Por ID) ---
-	usuario, err := repo.ObtenerPorID(nuevoUsuario.ID)
-	if err != nil {
-		log.Printf("Error al obtener: %v", err)
-	} else {
-		fmt.Printf("Usuario obtenido: %+v\n", usuario)
-	}
+	fmt.Println("Servidor corriendo en http://localhost:8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
+}
 
-	// --- 3. UPDATE ---
-	usuario.Nombre = "Carlos A. Pérez"
-	err = repo.Actualizar(usuario)
-	if err != nil {
-		log.Printf("Error al actualizar: %v", err)
-	} else {
-		fmt.Println("Usuario actualizado con éxito")
-	}
+// Controlador para GET (todos) y POST (crear)
+func (app *DB) handleUsuarios(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
 
-	// --- 2. READ ALL ---
-	todos, err := repo.ObtenerTodos()
-	if err == nil {
-		fmt.Println("\nLista de todos los usuarios:")
-		for _, u := range todos {
-			fmt.Printf("- ID: %d, Nombre: %s, Email: %s\n", u.ID, u.Nombre, u.Email)
+	switch r.Method {
+	case "GET":
+		rows, err := app.db.Query("SELECT id, name, email FROM usuarios")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
+		defer rows.Close()
+
+		var usuarios []Usuario
+		for rows.Next() {
+			var u Usuario
+			rows.Scan(&u.Id, &u.Name, &u.Email)
+			usuarios = append(usuarios, u)
+		}
+		json.NewEncoder(w).Encode(usuarios)
+
+	case "POST":
+		var u Usuario
+		if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		res, err := app.db.Exec("INSERT INTO usuarios (nombre, email) VALUES (?, ?)", u.Name, u.Email)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		id, _ := res.LastInsertId()
+		u.Id = int(id)
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(u)
+	}
+}
+
+// Controlador para PUT (actualizar) y DELETE (eliminar)
+func (app *DB) handleUsuarioPorID(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	idStr := r.URL.Path[len("/api/usuarios/"):]
+	id, err := strconv.Atoi(idStr)
+	if err != nil {
+		http.Error(w, "ID inválido", http.StatusBadRequest)
+		return
 	}
 
-	// --- 4. DELETE ---
-	err = repo.Eliminar(usuario.ID)
-	if err != nil {
-		log.Printf("Error al eliminar: %v", err)
-	} else {
-		fmt.Printf("Usuario con ID %d eliminado con éxito\n", usuario.ID)
+	switch r.Method {
+	case "PUT":
+		var u Usuario
+		if err := json.NewDecoder(r.Body).Decode(&u); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		_, err := app.db.Exec("UPDATE usuarios SET nombre = ?, email = ? WHERE id = ?", u.Name, u.Email, id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		u.Id = id
+		json.NewEncoder(w).Encode(u)
+
+	case "DELETE":
+		_, err := app.db.Exec("DELETE FROM usuarios WHERE id = ?", id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
