@@ -11,102 +11,144 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 )
 
-// ==========================================
-// 1. ENTIDAD (Objeto / Modelo)
-// ==========================================
+// ============================================================================
+// 1. MODELO / ENTIDAD
+// ============================================================================
 
-// Usuario representa nuestra entidad en la BDD
-// Nota: Usuario: Define cómo se ve un usuario en memoria. Los fragmentos json:"id" se llaman Struct Tags y le dicen a Go qué nombre usar en las claves del objeto JSON que viajará al cliente web.
-// Nota 2: Los campos de una estructura solo son visibles para otros paquetes si su nombre empieza con letra MAYÚSCULA.
 type Usuario struct {
-	Id    int    `json:"id"`
+	ID    int    `json:"id"`
 	Name  string `json:"name"`
 	Email string `json:"email"`
 }
 
-// ==========================================
-// 2. IMPLEMENTACIÓN POO (Estructura con métodos)
-// ==========================================
+// ============================================================================
+// 2. CAPA DE DATOS (REPOSITORIO) - Abstracción con Interfaz
+// ============================================================================
 
-// Nota: DB: Es una estructura contenedora que guarda el puntero a la conexión de la base de datos (*sql.DB). Esto nos permite adjuntarle métodos a la base de datos
-type DB struct {
-	db *sql.DB // Encapsulamos la conexión
+// UsuarioRepository define el contrato (Polimorfismo / Abstracción)
+type UsuarioRepository interface {
+	ObtenerTodos() ([]Usuario, error)
+	Crear(u *Usuario) error
+	Actualizar(u *Usuario) error
+	Eliminar(id int) error
 }
 
-// ==========================================
-// 3. EJECUCIÓN DEL PROGRAMA (Main)
-// ==========================================
-func main() {
-	// Reemplaza con tus credenciales reales
-	// Cadena de conexión: usuario:contraseña@tcp(127.0.0.1:3306)/nombre_bdd
-	var dsn = "root:@tcp(127.0.0.1:3306)/empresa"
+// mysqlUsuarioRepository es la implementación concreta para MySQL (Encapsulamiento)
+type mysqlUsuarioRepository struct {
+	db *sql.DB
+}
 
-	var db, err = sql.Open("mysql", dsn)
+// Constructor del Repositorio
+func NewMySQLUsuarioRepository(db *sql.DB) UsuarioRepository {
+	return &mysqlUsuarioRepository{db: db}
+}
+
+func (r *mysqlUsuarioRepository) ObtenerTodos() ([]Usuario, error) {
+	var rows, err = r.db.Query("SELECT id, name, email FROM usuarios")
 	if err != nil {
-		log.Fatalf("Error de configuración de BDD: %v", err)
+		return nil, err
 	}
-	defer db.Close()
+	defer rows.Close()
 
-	var app = &DB{db: db}
+	var usuarios []Usuario
+	for rows.Next() {
+		var u Usuario
+		var err = rows.Scan(&u.ID, &u.Name, &u.Email)
+		if err != nil {
+			return nil, err
+		}
+		usuarios = append(usuarios, u)
+	}
 
-	// Servir archivos estáticos (HTML y CSS) desde la carpeta "public"
-	var fs = http.FileServer(http.Dir("./public"))
-	http.Handle("/", fs)
+	var err2 = rows.Err()
+	if err2 != nil {
+		return nil, err2
+	}
 
-	// Rutas de la API REST
-	http.HandleFunc("/api/usuarios", app.handleUsuarios)
-	http.HandleFunc("/api/usuarios/", app.handleUsuarioPorID)
+	if usuarios == nil {
+		usuarios = []Usuario{}
+	}
 
-	fmt.Println("Servidor corriendo en http://localhost:8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	return usuarios, nil
 }
 
-// Controlador para GET (todos) y POST (crear)
-func (app *DB) handleUsuarios(w http.ResponseWriter, r *http.Request) {
+func (r *mysqlUsuarioRepository) Crear(u *Usuario) error {
+	var res, errE = r.db.Exec("INSERT INTO usuarios (name, email) VALUES (?, ?)", u.Name, u.Email)
+	if errE != nil {
+		return errE
+	}
+	var id, err = res.LastInsertId()
+	if err != nil {
+		return err
+	}
+	u.ID = int(id)
+	return nil
+}
+
+func (r *mysqlUsuarioRepository) Actualizar(u *Usuario) error {
+	var _, err = r.db.Exec("UPDATE usuarios SET name = ?, email = ? WHERE id = ?", u.Name, u.Email, u.ID)
+	return err
+}
+
+func (r *mysqlUsuarioRepository) Eliminar(id int) error {
+	var _, err = r.db.Exec("DELETE FROM usuarios WHERE id = ?", id)
+	return err
+}
+
+// ============================================================================
+// 3. CAPA DE PRESENTACIÓN (CONTROLADOR / HANDLER HTTP)
+// ============================================================================
+
+// UsuarioHandler maneja únicamente las peticiones HTTP (Inyección de Dependencias)
+type UsuarioHandler struct {
+	repo UsuarioRepository // Depende de la interfaz, NO de MySQL directamente
+}
+
+// Constructor del Handler
+func NewUsuarioHandler(repo UsuarioRepository) *UsuarioHandler {
+	return &UsuarioHandler{repo: repo}
+}
+
+func (h *UsuarioHandler) HandleUsuarios(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	switch r.Method {
 	case "GET":
-		var rows, err = app.db.Query("SELECT id, name, email FROM usuarios")
+		var usuarios, err = h.repo.ObtenerTodos()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
-		}
-		defer rows.Close()
-
-		var usuarios []Usuario
-		for rows.Next() {
-			var u Usuario
-			rows.Scan(&u.Id, &u.Name, &u.Email)
-			usuarios = append(usuarios, u)
 		}
 		json.NewEncoder(w).Encode(usuarios)
 
 	case "POST":
 		var u Usuario
-		var errD = json.NewDecoder(r.Body).Decode(&u)
-		if errD != nil {
-			http.Error(w, errD.Error(), http.StatusBadRequest)
-			return
-		}
-		var res, err = app.db.Exec("INSERT INTO usuarios (name, email) VALUES (?, ?)", u.Name, u.Email)
+		var err = json.NewDecoder(r.Body).Decode(&u)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		var id, _ = res.LastInsertId()
-		u.Id = int(id)
+
+		var err2 = h.repo.Crear(&u)
+		if err2 != nil {
+			http.Error(w, err2.Error(), http.StatusInternalServerError)
+			return
+		}
+
 		w.WriteHeader(http.StatusCreated)
 		json.NewEncoder(w).Encode(u)
+
+	default:
+		http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
 	}
 }
 
-// Controlador para PUT (actualizar) y DELETE (eliminar)
-func (app *DB) handleUsuarioPorID(w http.ResponseWriter, r *http.Request) {
+func (h *UsuarioHandler) HandleUsuarioPorID(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
+
 	var idStr = r.URL.Path[len("/api/usuarios/"):]
-	var id, errA = strconv.Atoi(idStr)
-	if errA != nil {
+	var id, err = strconv.Atoi(idStr)
+	if err != nil {
 		http.Error(w, "ID inválido", http.StatusBadRequest)
 		return
 	}
@@ -119,20 +161,56 @@ func (app *DB) handleUsuarioPorID(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		_, err = app.db.Exec("UPDATE usuarios SET name = ?, email = ? WHERE id = ?", u.Name, u.Email, id)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		u.ID = id
+		var err2 = h.repo.Actualizar(&u)
+		if err2 != nil {
+			http.Error(w, err2.Error(), http.StatusInternalServerError)
 			return
 		}
-		u.Id = id
+
 		json.NewEncoder(w).Encode(u)
 
 	case "DELETE":
-		var _, err = app.db.Exec("DELETE FROM usuarios WHERE id = ?", id)
+		var err = h.repo.Eliminar(id)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+
+	default:
+		http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
 	}
+}
+
+// ============================================================================
+// 4. PUNTO DE ENTRADA (ENSAMBLAJE / MAIN)
+// ============================================================================
+
+func main() {
+	// Cadena de conexión: usuario:contraseña@tcp(127.0.0.1:3306)/nombre_bdd
+	var dsn = "root:@tcp(127.0.0.1:3306)/empresa"
+
+	var db, err = sql.Open("mysql", dsn)
+	if err != nil {
+		log.Fatalf("Error de conexión: %v", err)
+	}
+	defer db.Close()
+
+	// 1. Instanciamos el Repositorio (Capa de datos)
+	var repo = NewMySQLUsuarioRepository(db)
+
+	// 2. Inyectamos el Repositorio dentro del Handler (Capa HTTP)
+	var handler = NewUsuarioHandler(repo)
+
+	// 3. Servidor de archivos estáticos HTML/CSS
+	var fs = http.FileServer(http.Dir("./public"))
+	http.Handle("/", fs)
+
+	// 4. Rutas asociadas a los métodos del Handler
+	http.HandleFunc("/api/usuarios", handler.HandleUsuarios)
+	http.HandleFunc("/api/usuarios/", handler.HandleUsuarioPorID)
+
+	fmt.Println("Servidor corriendo en http://localhost:8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
